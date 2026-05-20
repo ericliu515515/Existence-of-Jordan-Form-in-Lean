@@ -1,7 +1,19 @@
-% In this file you should put the actual content of the blueprint.
-% It will be used both by the web and the print version.
-% It should *not* include the \begin{document}
-%
-% If you want to split the blueprint content into several files then
-% the current file can be a simple sequence of \input. Otherwise It
-% can start with a \section or \chapter for instance.
+\chapter{First Test}
+
+This is a first local test of the blueprint.  The purpose is only to check
+that the web version renders correctly and that blueprint items can link to
+Lean declarations.
+
+\section{A Lean-linked item}
+
+\begin{definition}
+  \label{def:hello}
+  \lean{hello}
+  \leanok
+  The declaration \verb|hello| is the first Lean object in this project.
+\end{definition}
+
+\begin{remark}
+  Later, this file can describe the main plan for the Jordan form project:
+  definitions first, then lemmas, then the final theorem.
+\end{remark}
