@@ -1,1 +1,863 @@
+import Mathlib.Algebra.Module.PID
+import Mathlib.Algebra.BigOperators.Fin
+import Mathlib.Algebra.Polynomial.AlgebraMap
+import Mathlib.Algebra.Polynomial.Splits
+import Mathlib.Algebra.Polynomial.Module.FiniteDimensional
+import Mathlib.Data.Fin.Rev
+import Mathlib.LinearAlgebra.AnnihilatingPolynomial
+import Mathlib.LinearAlgebra.Basis.Defs
+import Mathlib.LinearAlgebra.DirectSum.Basis
+import Mathlib.LinearAlgebra.FiniteDimensional.Basic
+import Mathlib.LinearAlgebra.Matrix.Charpoly.Minpoly
+import Mathlib.LinearAlgebra.Matrix.ToLin
+import Mathlib.RingTheory.AdjoinRoot
+import Mathlib.RingTheory.Ideal.Quotient.Operations
 import JF.Basic
+
+namespace JF
+
+open Module Polynomial
+
+noncomputable section
+
+universe u v
+
+/-- The entry `(i, j)` is on the superdiagonal when `j = i + 1`.
+
+This uses the natural-number values of `Fin n`, so the last row has no
+superdiagonal entry. -/
+def IsSuperdiagonal {n : Nat} (i j : Fin n) : Prop :=
+  j.val = i.val + 1
+
+/-- A square matrix is in Jordan form if it has possible nonzero entries only
+on the diagonal and superdiagonal, every superdiagonal entry is either `0` or
+`1`, and a superdiagonal `1` only connects equal diagonal entries.
+
+This captures the usual block-diagonal Jordan shape without yet proving that a
+given linear map is similar to such a matrix. -/
+def IsJordanForm {n : Nat} {K : Type _} [Zero K] [One K]
+    (A : Matrix (Fin n) (Fin n) K) : Prop :=
+  (∀ i j, i ≠ j → ¬ IsSuperdiagonal i j → A i j = 0) ∧
+  (∀ i j, IsSuperdiagonal i j → A i j = 0 ∨ A i j = 1) ∧
+  (∀ i j, IsSuperdiagonal i j → A i j = 1 → A i i = A j j)
+
+/-- The single Jordan block with eigenvalue `a` and size `n`. -/
+noncomputable def JordanBlock {n : Nat} {K : Type _} [Zero K] [One K] (a : K) :
+    Matrix (Fin n) (Fin n) K := by
+  classical
+  exact fun i j => if i = j then a else if IsSuperdiagonal i j then 1 else 0
+
+/-- A single Jordan block is in Jordan form. -/
+theorem isJordanForm_jordanBlock {n : Nat} {K : Type _} [Zero K] [One K] (a : K) :
+    IsJordanForm (JordanBlock (n := n) a) := by
+  classical
+  refine ⟨?_, ?_, ?_⟩
+  · intro i j hij hnot
+    simp [JordanBlock, hij, hnot]
+  · intro i j hsup
+    right
+    have hij : i ≠ j := by
+      intro h
+      rw [h] at hsup
+      exact Nat.succ_ne_self j.val hsup.symm
+    simp [JordanBlock, hij, hsup]
+  · intro i j _ _
+    simp [JordanBlock]
+
+/-- The `K[X]`-module associated to a finite-dimensional endomorphism is torsion.
+
+Here `X` acts as `T`, via `Module.AEval' T`.  The annihilating polynomial is
+the minimal polynomial of `T`, so finite-dimensionality gives torsion. -/
+theorem aeval'_isTorsion_of_finiteDimensional
+    {K V : Type _} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V) :
+    Module.IsTorsion K[X] (Module.AEval' (R := K) T) := by
+  simpa [Module.AEval'_def] using
+    (Module.AEval.isTorsion_of_finiteDimensional (K := K) (M := V) (a := T))
+
+/-- The PID structure theorem applied to `V` as a `K[X]`-module via `T`.
+
+This is the formal algebraic input for the Jordan-form construction: after
+letting `X` act by `T`, the resulting finitely generated torsion module is a
+finite direct sum of quotients by powers of irreducible polynomials. -/
+theorem exists_pid_cyclic_decomposition_of_aeval'
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V) :
+    ∃ (ι : Type u) (_ : Fintype ι) (p : ι → K[X])
+      (_ : ∀ i, Irreducible (p i)) (e : ι → ℕ),
+        Nonempty <| (Module.AEval' (R := K) T ≃ₗ[K[X]]
+          DirectSum ι fun i => K[X] ⧸ K[X] ∙ p i ^ e i) := by
+  let instMod : Module K[X] (Module.AEval' (R := K) T) := inferInstance
+  let instFin : Module.Finite K[X] (Module.AEval' (R := K) T) := inferInstance
+  exact @Module.equiv_directSum_of_isTorsion (K[X]) _ _ (Module.AEval' (R := K) T) _
+    instMod _ instFin (aeval'_isTorsion_of_finiteDimensional T)
+
+/-- A degree-one polynomial over a field is associated to a monic linear factor. -/
+theorem associated_X_sub_C_of_natDegree_eq_one
+    {K : Type u} [Field K] {p : K[X]} (hp : p.natDegree = 1) :
+    ∃ a : K, Associated p (X - C a) := by
+  rcases Polynomial.natDegree_eq_one.mp hp with ⟨a, ha, b, hp_eq⟩
+  refine ⟨-a⁻¹ * b, ?_⟩
+  rw [← hp_eq]
+  have hunit : IsUnit (C a : K[X]) := Polynomial.isUnit_C.mpr (isUnit_iff_ne_zero.mpr ha)
+  have hpoly : C a * X + C b = C a * (X - C (-a⁻¹ * b)) := by
+    rw [sub_eq_add_neg, mul_add]
+    simp only [C_neg, C_mul, neg_mul, neg_neg]
+    rw [← mul_assoc, ← C_mul, mul_inv_cancel₀ ha, C_1, one_mul]
+  rw [hpoly]
+  exact (associated_unit_mul_right (X - C (-a⁻¹ * b) : K[X]) (C a) hunit).symm
+
+/-- An irreducible divisor of a nonzero split polynomial over a field is linear. -/
+theorem irreducible_associated_X_sub_C_of_splits_of_dvd
+    {K : Type u} [Field K] {p m : K[X]} (hp : Irreducible p)
+    (hm : m.Splits) (hm0 : m ≠ 0) (hpm : p ∣ m) :
+    ∃ a : K, Associated p (X - C a) :=
+  associated_X_sub_C_of_natDegree_eq_one ((hm.of_dvd hm0 hpm).natDegree_eq_one_of_irreducible hp)
+
+/-- An irreducible divisor of a split minimal polynomial is associated to `X - C a`. -/
+theorem irreducible_associated_X_sub_C_of_dvd_minpoly
+    {K V : Type _} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V) {p : K[X]}
+    (hp : Irreducible p) (h_split : (minpoly K T).Splits)
+    (hpm : p ∣ minpoly K T) :
+    ∃ a : K, Associated p (X - C a) :=
+  irreducible_associated_X_sub_C_of_splits_of_dvd hp h_split (minpoly.ne_zero_of_finite K T) hpm
+
+/-- The submodule generated by one polynomial is the underlying submodule of
+the ideal generated by that polynomial. -/
+theorem submodule_span_singleton_eq_ideal_span_singleton
+    {K : Type u} [Field K] (p : K[X]) :
+    (K[X] ∙ p : Submodule K[X] K[X]) =
+      ((Ideal.span ({p} : Set K[X]) : Ideal K[X]) : Submodule K[X] K[X]) := by
+  ext x
+  simp [Submodule.mem_span_singleton]
+
+/-- The annihilator of the cyclic quotient `K[X]/(p)` is the ideal `(p)`. -/
+theorem annihilator_quotient_span_singleton
+    {K : Type u} [Field K] (p : K[X]) :
+    Module.annihilator K[X] (K[X] ⧸ K[X] ∙ p) = Ideal.span ({p} : Set K[X]) := by
+  rw [submodule_span_singleton_eq_ideal_span_singleton (K := K) p]
+  exact Ideal.annihilator_quotient
+
+/-- Associated generators give linearly equivalent cyclic quotient modules. -/
+noncomputable def quotient_span_pow_linearEquiv_of_associated
+    {K : Type u} [Field K] {p q : K[X]} (hpq : Associated p q) (e : ℕ) :
+    (K[X] ⧸ K[X] ∙ p ^ e) ≃ₗ[K[X]] K[X] ⧸ K[X] ∙ q ^ e := by
+  refine Submodule.quotEquivOfEq _ _ ?_
+  calc
+    (K[X] ∙ p ^ e : Submodule K[X] K[X])
+        = ((Ideal.span ({p ^ e} : Set K[X]) : Ideal K[X]) : Submodule K[X] K[X]) :=
+            submodule_span_singleton_eq_ideal_span_singleton (K := K) (p ^ e)
+    _ = ((Ideal.span ({q ^ e} : Set K[X]) : Ideal K[X]) : Submodule K[X] K[X]) := by
+            rw [Ideal.span_singleton_eq_span_singleton.mpr (Associated.pow_pow hpq)]
+    _ = (K[X] ∙ q ^ e : Submodule K[X] K[X]) :=
+            (submodule_span_singleton_eq_ideal_span_singleton (K := K) (q ^ e)).symm
+
+/-- A split irreducible cyclic quotient can be rewritten using a linear factor. -/
+theorem exists_quotient_span_pow_linearEquiv_of_irreducible_dvd_split
+    {K : Type u} [Field K] {p m : K[X]} (hp : Irreducible p)
+    (hm : m.Splits) (hm0 : m ≠ 0) (hpm : p ∣ m) (e : ℕ) :
+    ∃ a : K, Nonempty <|
+      (K[X] ⧸ K[X] ∙ p ^ e) ≃ₗ[K[X]]
+        K[X] ⧸ K[X] ∙ (X - C a) ^ e := by
+  obtain ⟨a, ha⟩ := irreducible_associated_X_sub_C_of_splits_of_dvd hp hm hm0 hpm
+  exact ⟨a, ⟨quotient_span_pow_linearEquiv_of_associated ha e⟩⟩
+
+/-- In a PID decomposition of the `K[X]`-module attached to `T`, the annihilator
+of the whole module is contained in the annihilator of every cyclic summand.
+Consequently each summand generator power divides the minimal polynomial. -/
+theorem pid_decomposition_summand_pow_dvd_minpoly
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V)
+    {ι : Type u} (p : ι → K[X]) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ p i ^ e i) (i : ι) :
+    p i ^ e i ∣ minpoly K T := by
+  have hle : Ideal.span ({minpoly K T} : Set K[X]) ≤ Ideal.span ({p i ^ e i} : Set K[X]) := by
+    calc
+      Ideal.span ({minpoly K T} : Set K[X])
+          = Module.annihilator K[X] (Module.AEval' (R := K) T) :=
+            span_minpoly_eq_annihilator K T
+      _ = Module.annihilator K[X]
+            (DirectSum ι fun i => K[X] ⧸ K[X] ∙ p i ^ e i) := Φ.annihilator_eq
+      _ = ⨅ j, Module.annihilator K[X] (K[X] ⧸ K[X] ∙ p j ^ e j) :=
+            Module.annihilator_dfinsupp
+      _ ≤ Module.annihilator K[X] (K[X] ⧸ K[X] ∙ p i ^ e i) := iInf_le _ i
+      _ = Ideal.span ({p i ^ e i} : Set K[X]) :=
+            annihilator_quotient_span_singleton (K := K) (p i ^ e i)
+  exact Ideal.mem_span_singleton.mp ((Ideal.span_singleton_le_iff_mem _).mp hle)
+
+/-- A nonzero cyclic summand generator divides the minimal polynomial. -/
+theorem pid_decomposition_summand_dvd_minpoly_of_ne_zero_exponent
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V)
+    {ι : Type u} (p : ι → K[X]) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ p i ^ e i) (i : ι)
+    (hi : e i ≠ 0) :
+    p i ∣ minpoly K T :=
+  (dvd_pow_self (p i) hi).trans (pid_decomposition_summand_pow_dvd_minpoly T p e Φ i)
+
+/-- Therefore, under the split-minimal-polynomial hypothesis, every nonzero
+cyclic summand in the PID decomposition is generated by a power of a linear
+factor. -/
+theorem pid_decomposition_summand_associated_linear_of_minpoly_splits
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V)
+    (h_split : (minpoly K T).Splits)
+    {ι : Type u} (p : ι → K[X])
+    (hp : ∀ i, Irreducible (p i)) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ p i ^ e i) (i : ι)
+    (hi : e i ≠ 0) :
+    ∃ a : K, Associated (p i) (X - C a) :=
+  irreducible_associated_X_sub_C_of_dvd_minpoly T (hp i) h_split
+    (pid_decomposition_summand_dvd_minpoly_of_ne_zero_exponent T p e Φ i hi)
+
+/-- The PID decomposition of the `K[X]`-module attached to `T` can be rewritten,
+under the split-minimal-polynomial hypothesis, using only powers of linear
+factors. -/
+theorem exists_pid_linear_cyclic_decomposition_of_aeval'
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V)
+    (h_split : (minpoly K T).Splits) :
+    ∃ (ι : Type u) (_ : Fintype ι) (a : ι → K) (e : ι → ℕ),
+      Nonempty <| (Module.AEval' (R := K) T ≃ₗ[K[X]]
+        DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) := by
+  classical
+  obtain ⟨ι, hι, p, hp, e, ⟨Φ⟩⟩ := exists_pid_cyclic_decomposition_of_aeval' (K := K) (V := V) T
+  letI : Fintype ι := hι
+  let a : ι → K := fun i =>
+    if hi : e i = 0 then 0
+    else Classical.choose (pid_decomposition_summand_associated_linear_of_minpoly_splits
+      T h_split p hp e Φ i hi)
+  let E : (i : ι) → (K[X] ⧸ K[X] ∙ p i ^ e i) ≃ₗ[K[X]]
+      K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i := fun i => by
+    by_cases hi : e i = 0
+    · refine Submodule.quotEquivOfEq _ _ ?_
+      simp [hi, a]
+    · have hassoc : Associated (p i) (X - C (a i)) := by
+        simpa [a, hi] using Classical.choose_spec
+          (pid_decomposition_summand_associated_linear_of_minpoly_splits
+            T h_split p hp e Φ i hi)
+      exact quotient_span_pow_linearEquiv_of_associated hassoc (e i)
+  exact ⟨ι, hι, a, e, ⟨Φ.trans (DFinsupp.mapRange.linearEquiv E)⟩⟩
+
+/-- Translation identifies `K[X]/(X^e)` with `K[X]/((X - a)^e)`.
+
+This is the quotient-level form of changing variables from `X` to `X - a`.
+It is one of the algebraic steps needed to turn the PID cyclic summands into
+the usual Jordan blocks. -/
+noncomputable def quotient_X_pow_linear_pow_algEquiv
+    (K : Type u) [Field K] (a : K) (e : ℕ) :
+    (K[X] ⧸ Ideal.span ({((X : K[X]) ^ e)} : Set K[X])) ≃ₐ[K]
+      K[X] ⧸ Ideal.span ({(((X : K[X]) - C a) ^ e)} : Set K[X]) := by
+  let f : K[X] ≃ₐ[K] K[X] := Polynomial.algEquivAevalXAddC (-a)
+  refine Ideal.quotientEquivAlg _ _ f ?_
+  rw [Ideal.map_span, Set.image_singleton]
+  simp [f, Polynomial.algEquivAevalXAddC_apply, sub_eq_add_neg]
+
+/-- The standard power basis of `K[X]/(X^e)`, indexed by `Fin e`. -/
+noncomputable def quotient_X_pow_powerBasis
+    (K : Type u) [Field K] (e : ℕ) :
+    Basis (Fin e) K (AdjoinRoot ((X : K[X]) ^ e)) := by
+  refine Module.Basis.reindex (AdjoinRoot.powerBasis' (Polynomial.monic_X_pow (R := K) e)).basis ?_
+  exact finCongr (by simp [AdjoinRoot.powerBasis'])
+
+/-- The standard power basis really is given by powers of the quotient class of `X`. -/
+theorem quotient_X_pow_powerBasis_apply
+    (K : Type u) [Field K] (e : ℕ) (i : Fin e) :
+    quotient_X_pow_powerBasis K e i = (AdjoinRoot.root ((X : K[X]) ^ e)) ^ (i : ℕ) := by
+  unfold quotient_X_pow_powerBasis
+  rw [Module.Basis.coe_reindex]
+  simp only [Function.comp_apply]
+  rw [(AdjoinRoot.powerBasis' (Polynomial.monic_X_pow (R := K) e)).basis_eq_pow]
+  congr 1
+
+/-- The reversed power basis of `K[X]/(X^e)`.
+
+The order is `X^(e-1), ..., X, 1`, which is the convention that makes
+multiplication by `X` land on the superdiagonal rather than the subdiagonal. -/
+noncomputable def quotient_X_pow_reverseBasis
+    (K : Type u) [Field K] (e : ℕ) :
+    Basis (Fin e) K (AdjoinRoot ((X : K[X]) ^ e)) :=
+  Module.Basis.reindex (quotient_X_pow_powerBasis K e) Fin.revPerm
+
+/-- The reversed power basis is indexed by the reversed exponent. -/
+theorem quotient_X_pow_reverseBasis_apply
+    (K : Type u) [Field K] (e : ℕ) (i : Fin e) :
+    quotient_X_pow_reverseBasis K e i =
+      (AdjoinRoot.root ((X : K[X]) ^ e)) ^ (Fin.rev i : ℕ) := by
+  unfold quotient_X_pow_reverseBasis
+  rw [Module.Basis.coe_reindex]
+  simp only [Function.comp_apply]
+  rw [quotient_X_pow_powerBasis_apply]
+  congr 1
+
+/-- In `K[X]/(X^e)`, the class of `X` is nilpotent of exponent `e`. -/
+theorem adjoinRoot_X_pow_root_pow_eq_zero
+    (K : Type u) [Field K] (e : ℕ) :
+    (AdjoinRoot.root ((X : K[X]) ^ e)) ^ e = 0 := by
+  simpa using AdjoinRoot.eval₂_root ((X : K[X]) ^ e)
+
+/-- In the reversed basis of `K[X]/(X^(n+1))`, multiplication by the quotient
+class of `X` shifts one step toward the beginning, and kills the first vector. -/
+theorem root_mul_quotient_X_pow_reverseBasis_apply_succ
+    (K : Type u) [Field K] (n : ℕ) (j : Fin (n + 1)) :
+    AdjoinRoot.root ((X : K[X]) ^ (n + 1)) * quotient_X_pow_reverseBasis K (n + 1) j =
+      if h : j = 0 then 0 else
+        quotient_X_pow_reverseBasis K (n + 1) (Fin.castSucc (Fin.pred j h)) := by
+  by_cases h : j = 0
+  · subst h
+    rw [dif_pos rfl]
+    rw [quotient_X_pow_reverseBasis_apply]
+    simpa [pow_succ'] using adjoinRoot_X_pow_root_pow_eq_zero K (n + 1)
+  · rw [dif_neg h]
+    rw [quotient_X_pow_reverseBasis_apply, quotient_X_pow_reverseBasis_apply]
+    rw [← pow_succ']
+    congr 1
+    rw [Fin.val_rev, Fin.val_rev]
+    simp only [Fin.val_castSucc, Fin.val_pred]
+    have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 h
+    omega
+
+lemma reverseBasis_pred_ne_self {n : ℕ} {j : Fin (n + 1)} (hj : j ≠ 0) :
+    Fin.castSucc (Fin.pred j hj) ≠ j := by
+  intro h
+  have hval := congrArg Fin.val h
+  simp only [Fin.val_castSucc, Fin.val_pred] at hval
+  have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
+  omega
+
+lemma reverseBasis_pred_isSuperdiagonal {n : ℕ} {j : Fin (n + 1)} (hj : j ≠ 0) :
+    IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j := by
+  dsimp [IsSuperdiagonal]
+  have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
+  omega
+
+/-- Multiplication by `a + X` on `K[X]/(X^e)`, as a `K`-linear map. -/
+noncomputable def quotient_X_pow_rootPlusScalarLinear
+    (K : Type u) [Field K] (a : K) (e : ℕ) :
+    AdjoinRoot ((X : K[X]) ^ e) →ₗ[K] AdjoinRoot ((X : K[X]) ^ e) :=
+  LinearMap.mulLeft K (algebraMap K (AdjoinRoot ((X : K[X]) ^ e)) a +
+    AdjoinRoot.root ((X : K[X]) ^ e))
+
+/-- The action of multiplication by `a + X` on one vector of the reversed basis. -/
+theorem quotient_X_pow_rootPlusScalarLinear_apply_reverseBasis_succ
+    (K : Type u) [Field K] (a : K) (n : ℕ) (j : Fin (n + 1)) :
+    quotient_X_pow_rootPlusScalarLinear K a (n + 1) (quotient_X_pow_reverseBasis K (n + 1) j) =
+      a • quotient_X_pow_reverseBasis K (n + 1) j +
+        if h : j = 0 then 0 else
+          quotient_X_pow_reverseBasis K (n + 1) (Fin.castSucc (Fin.pred j h)) := by
+  simp [quotient_X_pow_rootPlusScalarLinear, LinearMap.mulLeft_apply, add_mul,
+    Algebra.smul_def, root_mul_quotient_X_pow_reverseBasis_apply_succ]
+
+/-- In the reversed power basis, multiplication by `a + X` is the single Jordan
+block with eigenvalue `a`. -/
+theorem quotient_X_pow_rootPlusScalarLinear_toMatrix_reverseBasis_succ
+    (K : Type u) [Field K] (a : K) (n : ℕ) :
+    LinearMap.toMatrix (quotient_X_pow_reverseBasis K (n + 1))
+      (quotient_X_pow_reverseBasis K (n + 1))
+      (quotient_X_pow_rootPlusScalarLinear K a (n + 1)) = JordanBlock a := by
+  classical
+  ext i j
+  rw [LinearMap.toMatrix_apply]
+  rw [quotient_X_pow_rootPlusScalarLinear_apply_reverseBasis_succ]
+  by_cases hj : j = 0
+  · subst hj
+    rw [dif_pos rfl]
+    by_cases hij : i = 0
+    · subst hij
+      simp [JordanBlock]
+    · have hnot : ¬ IsSuperdiagonal i 0 := by
+        intro hsup
+        simp [IsSuperdiagonal] at hsup
+      simp [JordanBlock, hij, hnot]
+  · rw [dif_neg hj]
+    have hpred_ne_j : Fin.castSucc (Fin.pred j hj) ≠ j := reverseBasis_pred_ne_self hj
+    have hsup_pred : IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
+      reverseBasis_pred_isSuperdiagonal hj
+    by_cases hi_j : i = j
+    · have hnot : ¬ IsSuperdiagonal i j := by
+        rw [hi_j]
+        intro hsup
+        exact Nat.succ_ne_self j.val hsup.symm
+      simp [JordanBlock, hi_j, hpred_ne_j.symm]
+    · by_cases hi_pred : i = Fin.castSucc (Fin.pred j hj)
+      · simp [JordanBlock, hi_pred, hpred_ne_j, hsup_pred]
+      · have hnot : ¬ IsSuperdiagonal i j := by
+          intro hsup
+          apply hi_pred
+          apply Fin.ext
+          dsimp [IsSuperdiagonal] at hsup
+          simp only [Fin.val_castSucc, Fin.val_pred]
+          have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
+          omega
+        simp [JordanBlock, hi_j, hnot, hi_pred]
+
+/-- Scalar action by `X` as a `K`-linear map on a `K[X]`-module. -/
+noncomputable def XSMulLinear
+    (K : Type u) [Field K] (M : Type v) [AddCommGroup M] [Module K M]
+    [Module K[X] M] [SMulCommClass K[X] K M] : M →ₗ[K] M :=
+  DistribSMul.toLinearMap K M (X : K[X])
+
+/-- The ideal-quotient version and the submodule-quotient version of a cyclic
+polynomial quotient are linearly equivalent over `K`. -/
+noncomputable def quotient_ideal_to_span_linearEquiv
+    {K : Type u} [Field K] (g : K[X]) :
+    (K[X] ⧸ Ideal.span ({g} : Set K[X])) ≃ₗ[K]
+      K[X] ⧸ K[X] ∙ g :=
+  (Submodule.quotEquivOfEq
+    (((Ideal.span ({g} : Set K[X]) : Ideal K[X]) : Submodule K[X] K[X]))
+    (K[X] ∙ g)
+    (submodule_span_singleton_eq_ideal_span_singleton (K := K) g).symm).restrictScalars K
+
+/-- The reversed power basis transported to `K[X]/((X - a)^e)`. -/
+noncomputable def linearQuotientReverseBasis
+    (K : Type u) [Field K] (a : K) (e : ℕ) :
+    Basis (Fin e) K (K[X] ⧸ K[X] ∙ (X - C a) ^ e) :=
+  (quotient_X_pow_reverseBasis K e).map
+    ((quotient_X_pow_linear_pow_algEquiv K a e).toLinearEquiv.trans
+      (quotient_ideal_to_span_linearEquiv ((X - C a : K[X]) ^ e)))
+
+/-- The transported reversed basis on `K[X]/((X-a)^e)` is represented by
+powers of `X-a`. -/
+theorem linearQuotientReverseBasis_apply
+    (K : Type u) [Field K] (a : K) (e : ℕ) (i : Fin e) :
+    linearQuotientReverseBasis K a e i =
+      (Submodule.Quotient.mk (((X : K[X]) - C a) ^ (Fin.rev i : ℕ)) :
+        K[X] ⧸ K[X] ∙ (X - C a) ^ e) := by
+  unfold linearQuotientReverseBasis
+  rw [Module.Basis.coe_map]
+  simp only [Function.comp_apply]
+  rw [quotient_X_pow_reverseBasis_apply]
+  conv_lhs =>
+    arg 2
+    rw [← (AdjoinRoot.mk_X (f := ((X : K[X]) ^ e)))]
+    rw [← map_pow]
+  change ((quotient_X_pow_linear_pow_algEquiv K a e).toLinearEquiv.trans
+      (quotient_ideal_to_span_linearEquiv ((X - C a : K[X]) ^ e)))
+      ((Ideal.Quotient.mk (Ideal.span ({((X : K[X]) ^ e)} : Set K[X])))
+        ((X : K[X]) ^ (Fin.rev i : ℕ))) = _
+  rw [show ((quotient_X_pow_linear_pow_algEquiv K a e).toLinearEquiv.trans
+      (quotient_ideal_to_span_linearEquiv ((X - C a : K[X]) ^ e)))
+      ((Ideal.Quotient.mk (Ideal.span ({((X : K[X]) ^ e)} : Set K[X])))
+        ((X : K[X]) ^ (Fin.rev i : ℕ))) =
+      (Submodule.Quotient.mk ((Polynomial.algEquivAevalXAddC (-a))
+        ((X : K[X]) ^ (Fin.rev i : ℕ))) :
+        K[X] ⧸ K[X] ∙ (X - C a) ^ e) by rfl]
+  simp [Polynomial.algEquivAevalXAddC_apply, sub_eq_add_neg]
+
+/-- Scalar action by `X` on one vector of the reversed basis of
+`K[X]/((X-a)^(n+1))`. -/
+theorem XSMulLinear_apply_linearQuotientReverseBasis_succ
+    (K : Type u) [Field K] (a : K) (n : ℕ) (j : Fin (n + 1)) :
+    XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C a) ^ (n + 1))
+      (linearQuotientReverseBasis K a (n + 1) j) =
+      a • linearQuotientReverseBasis K a (n + 1) j +
+        if h : j = 0 then 0 else
+          linearQuotientReverseBasis K a (n + 1) (Fin.castSucc (Fin.pred j h)) := by
+  rw [linearQuotientReverseBasis_apply]
+  unfold XSMulLinear
+  simp only [DistribSMul.toLinearMap_apply]
+  by_cases hj : j = 0
+  · subst hj
+    rw [dif_pos rfl]
+    simp only [add_zero]
+    rw [← Submodule.Quotient.mk_smul]
+    rw [← Submodule.Quotient.mk_smul]
+    rw [Submodule.Quotient.eq]
+    simp only [Submodule.mem_span_singleton]
+    use 1
+    rw [Polynomial.smul_eq_C_mul]
+    simp
+    ring
+  · rw [dif_neg hj]
+    rw [linearQuotientReverseBasis_apply]
+    rw [← Submodule.Quotient.mk_smul]
+    rw [← Submodule.Quotient.mk_smul]
+    rw [← Submodule.Quotient.mk_add]
+    congr 1
+    rw [Fin.val_rev, Fin.val_rev]
+    simp only [Fin.val_castSucc, Fin.val_pred]
+    have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
+    have hpow0 : n + 1 - ((j : ℕ) + 1) = n - (j : ℕ) := by omega
+    have hpow1 : n + 1 - ((j : ℕ) - 1 + 1) = n - (j : ℕ) + 1 := by omega
+    rw [hpow0, hpow1]
+    rw [smul_eq_mul, Polynomial.smul_eq_C_mul]
+    ring
+
+/-- The predecessor of a positive `Fin` index, kept in the same ambient
+`Fin n`.  Its value is `j - 1`. -/
+def finPredSame {n : ℕ} (j : Fin n) (_ : j.val ≠ 0) : Fin n :=
+  ⟨j.val - 1, by
+    have hjlt := j.isLt
+    omega⟩
+
+/-- Scalar action by `X` on one vector of the reversed basis of
+`K[X]/((X-a)^e)`, stated for an arbitrary nonempty index type `Fin e`. -/
+theorem XSMulLinear_apply_linearQuotientReverseBasis
+    (K : Type u) [Field K] (a : K) (e : ℕ) (j : Fin e) :
+    XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C a) ^ e)
+      (linearQuotientReverseBasis K a e j) =
+      a • linearQuotientReverseBasis K a e j +
+        if h : j.val = 0 then 0 else
+          linearQuotientReverseBasis K a e (finPredSame j h) := by
+  cases e with
+  | zero => exact Fin.elim0 j
+  | succ n =>
+      rw [XSMulLinear_apply_linearQuotientReverseBasis_succ]
+      by_cases hjval : j.val = 0
+      · have hj : j = 0 := Fin.ext hjval
+        simp [hj]
+      · have hj : j ≠ 0 := by
+          intro h
+          apply hjval
+          rw [h]
+          simp
+        rw [dif_neg hj, dif_neg hjval]
+        congr 1
+
+/-- On each linear cyclic quotient, scalar action by `X` has the single Jordan
+block matrix in the transported reversed basis. -/
+theorem XSMulLinear_toMatrix_linearQuotientReverseBasis_succ
+    (K : Type u) [Field K] (a : K) (n : ℕ) :
+    LinearMap.toMatrix (linearQuotientReverseBasis K a (n + 1))
+      (linearQuotientReverseBasis K a (n + 1))
+      (XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C a) ^ (n + 1))) = JordanBlock a := by
+  classical
+  ext i j
+  rw [LinearMap.toMatrix_apply]
+  rw [XSMulLinear_apply_linearQuotientReverseBasis_succ]
+  by_cases hj : j = 0
+  · subst hj
+    rw [dif_pos rfl]
+    by_cases hij : i = 0
+    · subst hij
+      simp [JordanBlock]
+    · have hnot : ¬ IsSuperdiagonal i 0 := by
+        intro hsup
+        simp [IsSuperdiagonal] at hsup
+      simp [JordanBlock, hij, hnot]
+  · rw [dif_neg hj]
+    have hpred_ne_j : Fin.castSucc (Fin.pred j hj) ≠ j := reverseBasis_pred_ne_self hj
+    have hsup_pred : IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
+      reverseBasis_pred_isSuperdiagonal hj
+    by_cases hi_j : i = j
+    · have hnot : ¬ IsSuperdiagonal i j := by
+        rw [hi_j]
+        intro hsup
+        exact Nat.succ_ne_self j.val hsup.symm
+      simp [JordanBlock, hi_j, hpred_ne_j.symm]
+    · by_cases hi_pred : i = Fin.castSucc (Fin.pred j hj)
+      · simp [JordanBlock, hi_pred, hpred_ne_j, hsup_pred]
+      · have hnot : ¬ IsSuperdiagonal i j := by
+          intro hsup
+          apply hi_pred
+          apply Fin.ext
+          dsimp [IsSuperdiagonal] at hsup
+          simp only [Fin.val_castSucc, Fin.val_pred]
+          have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
+          omega
+        simp [JordanBlock, hi_j, hnot, hi_pred]
+
+/-- The matrix of scalar action by `X` on one linear cyclic quotient is in
+Jordan form. -/
+theorem isJordanForm_XSMulLinear_linearQuotientReverseBasis_succ
+    (K : Type u) [Field K] (a : K) (n : ℕ) :
+    IsJordanForm (LinearMap.toMatrix (linearQuotientReverseBasis K a (n + 1))
+      (linearQuotientReverseBasis K a (n + 1))
+      (XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C a) ^ (n + 1)))) := by
+  rw [XSMulLinear_toMatrix_linearQuotientReverseBasis_succ]
+  exact isJordanForm_jordanBlock a
+
+/-- The direct-sum basis obtained by taking the reversed cyclic basis on each
+linear cyclic summand. -/
+noncomputable def linearQuotientDirectSumBasis
+    {K : Type u} [Field K] {ι : Type v} (a : ι → K) (e : ι → ℕ) :
+    Basis ((i : ι) × Fin (e i)) K
+      (DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) :=
+  DFinsupp.basis fun i => linearQuotientReverseBasis K (a i) (e i)
+
+/-- The basis vector of a dependent direct-sum basis is the corresponding
+single-supported direct-sum vector. -/
+theorem dfinsupp_basis_apply
+    {R : Type u} {ι : Type v} {M : ι → Type _} {η : ι → Type _}
+    [Semiring R] [∀ i, AddCommMonoid (M i)] [∀ i, Module R (M i)]
+    [DecidableEq ι] (b : ∀ i, Basis (η i) R (M i)) (ix : (i : ι) × η i) :
+    (DFinsupp.basis b) ix = DFinsupp.single ix.1 (b ix.1 ix.2) := by
+  rcases ix with ⟨i, x⟩
+  apply Basis.apply_eq_iff.mpr
+  ext jy
+  rcases jy with ⟨j, y⟩
+  by_cases h : i = j
+  · subst h
+    simp [DFinsupp.basis, Finsupp.single_apply_left sigma_mk_injective]
+  · simp_all [DFinsupp.basis]
+
+/-- The direct-sum cyclic basis vector is supported on exactly one cyclic
+summand. -/
+theorem linearQuotientDirectSumBasis_apply
+    {K : Type u} [Field K] {ι : Type v} [DecidableEq ι]
+    (a : ι → K) (e : ι → ℕ) (i : ι) (j : Fin (e i)) :
+    linearQuotientDirectSumBasis (K := K) a e ⟨i, j⟩ =
+      DFinsupp.single i (linearQuotientReverseBasis K (a i) (e i) j) := by
+  simpa [linearQuotientDirectSumBasis] using
+    (dfinsupp_basis_apply
+      (b := fun i => linearQuotientReverseBasis K (a i) (e i)) ⟨i, j⟩)
+
+/-- Scalar action by `X` on the direct-sum cyclic basis acts in the unique
+summand containing the chosen basis vector. -/
+theorem XSMulLinear_apply_linearQuotientDirectSumBasis
+    {K : Type u} [Field K] {ι : Type v}
+    (a : ι → K) (e : ι → ℕ) (i : ι) (j : Fin (e i)) :
+    XSMulLinear K (DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i)
+      (linearQuotientDirectSumBasis (K := K) a e ⟨i, j⟩) =
+      a i • linearQuotientDirectSumBasis (K := K) a e ⟨i, j⟩ +
+        if h : j.val = 0 then 0 else
+          linearQuotientDirectSumBasis (K := K) a e ⟨i, finPredSame j h⟩ := by
+  classical
+  rw [linearQuotientDirectSumBasis_apply]
+  unfold XSMulLinear
+  simp only [DistribSMul.toLinearMap_apply]
+  change (X : K[X]) •
+      (DFinsupp.single i ((linearQuotientReverseBasis K (a i) (e i)) j) :
+        Π₀ i : ι, K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) = _
+  rw [← DFinsupp.single_smul (i := i) (c := (X : K[X]))]
+  change (DFinsupp.single
+      (β := fun i : ι => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) i
+      (XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i)
+        ((linearQuotientReverseBasis K (a i) (e i)) j))) = _
+  rw [XSMulLinear_apply_linearQuotientReverseBasis]
+  by_cases hjval : j.val = 0
+  · simp [hjval, DFinsupp.single_smul]
+    rfl
+  · simp [hjval, linearQuotientDirectSumBasis_apply, DFinsupp.single_add, DFinsupp.single_smul]
+    rfl
+
+/-- The basis of `V` obtained by transporting the direct-sum cyclic basis across
+the structure-theorem equivalence and the `AEval'` type synonym. -/
+noncomputable def transportedLinearCyclicBasis
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    (T : V →ₗ[K] V) {ι : Type u} (a : ι → K) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) :
+    Basis ((i : ι) × Fin (e i)) K V :=
+  ((linearQuotientDirectSumBasis (K := K) a e).map (Φ.symm.restrictScalars K)).map
+    (Module.AEval'.of T).symm
+
+/-- In the transported cyclic basis of `V`, the operator `T` has the same
+componentwise Jordan-shift action as scalar multiplication by `X` on the
+linear cyclic direct sum. -/
+theorem T_apply_transportedLinearCyclicBasis
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    (T : V →ₗ[K] V) {ι : Type u} (a : ι → K) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i)
+    (i : ι) (j : Fin (e i)) :
+    T (transportedLinearCyclicBasis T a e Φ ⟨i, j⟩) =
+      a i • transportedLinearCyclicBasis T a e Φ ⟨i, j⟩ +
+        if h : j.val = 0 then 0 else
+          transportedLinearCyclicBasis T a e Φ ⟨i, finPredSame j h⟩ := by
+  let B := linearQuotientDirectSumBasis (K := K) a e
+  let L : (DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i) →ₗ[K] V :=
+    (Module.AEval'.of T).symm.toLinearMap.comp (Φ.symm.restrictScalars K).toLinearMap
+  change T (L (B ⟨i, j⟩)) =
+      a i • L (B ⟨i, j⟩) + if h : j.val = 0 then 0 else L (B ⟨i, finPredSame j h⟩)
+  have hTX : T (L (B ⟨i, j⟩)) = L
+      (XSMulLinear K (DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i)
+        (B ⟨i, j⟩)) := by
+    dsimp [L]
+    rw [← Module.AEval'.of_symm_X_smul (φ := T) (m := Φ.symm (B ⟨i, j⟩))]
+    change (Module.AEval'.of T).symm ((X : K[X]) • Φ.symm (B ⟨i, j⟩)) = _
+    rw [← Φ.symm.map_smul]
+    rfl
+  rw [hTX]
+  rw [XSMulLinear_apply_linearQuotientDirectSumBasis]
+  by_cases hjval : j.val = 0
+  · simp [hjval, L, B]
+  · rw [dif_neg hjval]
+    rw [dif_neg hjval]
+    rw [map_add, map_smul]
+
+/-- Matrix entries of `T` in the transported cyclic basis, before the cyclic
+blocks are concatenated into one `Fin`-indexed order. -/
+theorem transportedLinearCyclicBasis_toMatrix_apply
+    {K : Type u} {V : Type v} [Field K] [AddCommGroup V] [Module K V]
+    (T : V →ₗ[K] V) {ι : Type u} [Fintype ι] [DecidableEq ι]
+    (a : ι → K) (e : ι → ℕ)
+    (Φ : Module.AEval' (R := K) T ≃ₗ[K[X]]
+      DirectSum ι fun i => K[X] ⧸ K[X] ∙ (X - C (a i)) ^ e i)
+    (r c : (i : ι) × Fin (e i)) :
+    LinearMap.toMatrix (transportedLinearCyclicBasis T a e Φ)
+      (transportedLinearCyclicBasis T a e Φ) T r c =
+      if r = c then a c.1 else
+        if hc : c.2.val = 0 then 0 else
+          if r = ⟨c.1, finPredSame c.2 hc⟩ then 1 else 0 := by
+  rcases c with ⟨i, j⟩
+  rw [LinearMap.toMatrix_apply]
+  rw [T_apply_transportedLinearCyclicBasis]
+  by_cases hjval : j.val = 0
+  · rw [dif_pos hjval]
+    by_cases hr : r = ⟨i, j⟩
+    · subst hr
+      simp [Basis.repr_self]
+    · simp [hr, hjval, Basis.repr_self]
+  · rw [dif_neg hjval]
+    by_cases hr : r = ⟨i, j⟩
+    · subst hr
+      have hpred_ne : (⟨i, finPredSame j hjval⟩ : (i : ι) × Fin (e i)) ≠ ⟨i, j⟩ := by
+        intro hEq
+        have hval : (finPredSame j hjval).val = j.val := by
+          simpa using congrArg (fun x : (i : ι) × Fin (e i) => (x.2 : ℕ)) hEq
+        simp [finPredSame] at hval
+        have hjpos : 0 < j.val := Nat.pos_of_ne_zero hjval
+        omega
+      simp [Basis.repr_self, hpred_ne]
+    · by_cases hp : r = ⟨i, finPredSame j hjval⟩
+      · subst hp
+        simp [hr, hjval, Basis.repr_self]
+      · simp [hr, hp, hjval, Basis.repr_self]
+
+/-- Reindex a dependent family of cyclic blocks by first enumerating the
+summands and then concatenating the finite fibers in that order. -/
+noncomputable def sigmaFintypeCongr {ι : Type u} [Fintype ι] (e : ι → ℕ) :
+    ((i : ι) × Fin (e i)) ≃
+      (k : Fin (Fintype.card ι)) × Fin (e ((Fintype.equivFin ι).symm k)) := by
+  let q : ι ≃ Fin (Fintype.card ι) := Fintype.equivFin ι
+  exact Equiv.sigmaCongr q (fun i => finCongr (by simp [q]))
+
+/-- The block-ordered `Fin` index for the sigma type of cyclic summand basis
+vectors. -/
+noncomputable def sigmaFintypeEquivFin {ι : Type u} [Fintype ι] (e : ι → ℕ) :
+    ((i : ι) × Fin (e i)) ≃
+      Fin (∑ k : Fin (Fintype.card ι), e ((Fintype.equivFin ι).symm k)) :=
+  (sigmaFintypeCongr e).trans finSigmaFinEquiv
+
+/-- In the block-ordered `Fin` index, the predecessor inside a cyclic summand
+is immediately before the original basis vector. -/
+theorem sigmaFintypeEquivFin_pred_isSuperdiagonal {ι : Type u} [Fintype ι]
+    (e : ι → ℕ) (i : ι) (j : Fin (e i)) (hj : j.val ≠ 0) :
+    IsSuperdiagonal (sigmaFintypeEquivFin e ⟨i, finPredSame j hj⟩)
+      (sigmaFintypeEquivFin e ⟨i, j⟩) := by
+  dsimp [IsSuperdiagonal]
+  unfold sigmaFintypeEquivFin sigmaFintypeCongr
+  simp only [Equiv.trans_apply, finSigmaFinEquiv_apply]
+  simp only [Equiv.sigmaCongr, Equiv.trans_apply, Equiv.sigmaCongrRight_apply,
+    Equiv.sigmaCongrLeft_apply]
+  simp only [finCongr_apply, Fin.val_cast]
+  set base := ∑ x, e ((Fintype.equivFin ι).symm (Fin.castLE _ x))
+  change base + j.val = base + (j.val - 1) + 1
+  conv_rhs => rw [Nat.add_assoc]
+  rw [Nat.add_left_cancel_iff]
+  have hjpos : 0 < j.val := Nat.pos_of_ne_zero hj
+  omega
+
+/-- Jordan form theorem, stated as the project target.
+
+Every endomorphism of a finite-dimensional vector space whose minimal
+polynomial splits admits a basis in which its matrix is in Jordan form. -/
+theorem exists_basis_matrix_is_jordan_form_of_minpoly_splits
+    {K V : Type _} [Field K] [AddCommGroup V] [Module K V]
+    [FiniteDimensional K V] (T : V →ₗ[K] V)
+    (h_split : (minpoly K T).Splits) :
+    ∃ (n : Nat) (b : Basis (Fin n) K V),
+      IsJordanForm (LinearMap.toMatrix b b T) := by
+  classical
+  obtain ⟨ι, hι, a, e, ⟨Φ⟩⟩ := exists_pid_linear_cyclic_decomposition_of_aeval' T h_split
+  letI : Fintype ι := hι
+  letI : DecidableEq ι := Classical.decEq ι
+  let n : Nat := ∑ k : Fin (Fintype.card ι), e ((Fintype.equivFin ι).symm k)
+  let E : ((i : ι) × Fin (e i)) ≃ Fin n := sigmaFintypeEquivFin e
+  let bσ : Basis ((i : ι) × Fin (e i)) K V := transportedLinearCyclicBasis T a e Φ
+  let b : Basis (Fin n) K V := bσ.reindex E
+  refine ⟨n, b, ?_⟩
+  have hentry (r c : Fin n) :
+      LinearMap.toMatrix b b T r c =
+        if E.symm r = E.symm c then a (E.symm c).1 else
+          if hc : (E.symm c).2.val = 0 then 0 else
+            if E.symm r = ⟨(E.symm c).1, finPredSame (E.symm c).2 hc⟩ then 1 else 0 := by
+    dsimp [b, bσ]
+    trans LinearMap.toMatrix (transportedLinearCyclicBasis T a e Φ)
+        (transportedLinearCyclicBasis T a e Φ) T (E.symm r) (E.symm c)
+    · rw [LinearMap.toMatrix_apply]
+      rw [Basis.reindex_apply]
+      rw [Basis.repr_reindex_apply]
+      rw [LinearMap.toMatrix_apply]
+    · rw [transportedLinearCyclicBasis_toMatrix_apply]
+  refine ⟨?_, ?_, ?_⟩
+  · intro r c hne hnot
+    rw [hentry r c]
+    by_cases hsig : E.symm r = E.symm c
+    · exfalso
+      apply hne
+      simpa using congrArg E hsig
+    · rw [if_neg hsig]
+      by_cases hc0 : (E.symm c).2.val = 0
+      · rw [dif_pos hc0]
+      · rw [dif_neg hc0]
+        by_cases hp : E.symm r = ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩
+        · exfalso
+          apply hnot
+          have hr : r = E ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩ := by
+            simpa using congrArg E hp
+          have hsup : IsSuperdiagonal
+              (E ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩)
+              (E ⟨(E.symm c).1, (E.symm c).2⟩) := by
+            simpa [E] using sigmaFintypeEquivFin_pred_isSuperdiagonal e
+              (E.symm c).1 (E.symm c).2 hc0
+          rw [hr]
+          convert hsup using 1
+          simp
+        · rw [if_neg hp]
+  · intro r c hsup
+    rw [hentry r c]
+    have hne : r ≠ c := by
+      intro h
+      rw [h] at hsup
+      exact Nat.succ_ne_self c.val hsup.symm
+    have hsig : E.symm r ≠ E.symm c := by
+      intro h
+      apply hne
+      simpa using congrArg E h
+    rw [if_neg hsig]
+    by_cases hc0 : (E.symm c).2.val = 0
+    · rw [dif_pos hc0]
+      left
+      rfl
+    · rw [dif_neg hc0]
+      by_cases hp : E.symm r = ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩
+      · rw [if_pos hp]
+        right
+        rfl
+      · rw [if_neg hp]
+        left
+        rfl
+  · intro r c hsup hval
+    have hne : r ≠ c := by
+      intro h
+      rw [h] at hsup
+      exact Nat.succ_ne_self c.val hsup.symm
+    have hsig : E.symm r ≠ E.symm c := by
+      intro h
+      apply hne
+      simpa using congrArg E h
+    rw [hentry r c] at hval
+    rw [if_neg hsig] at hval
+    by_cases hc0 : (E.symm c).2.val = 0
+    · rw [dif_pos hc0] at hval
+      exfalso
+      exact zero_ne_one hval
+    · rw [dif_neg hc0] at hval
+      by_cases hp : E.symm r = ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩
+      · rw [hentry r r, hentry c c]
+        have hfst : (E.symm r).1 = (E.symm c).1 := by
+          rw [hp]
+        simp [hfst]
+      · rw [if_neg hp] at hval
+        exfalso
+        exact zero_ne_one hval
+
+end
+
+end JF
