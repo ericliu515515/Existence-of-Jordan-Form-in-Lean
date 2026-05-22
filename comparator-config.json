@@ -1,0 +1,7 @@
+{
+  "challenge_module": "JF.ComparatorChallenge",
+  "solution_module": "JF.ComparatorSolution",
+  "theorem_names": ["JFComparator.exists_basis_matrix_is_jordan_form_of_minpoly_splits"],
+  "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
+  "enable_nanoda": false
+}

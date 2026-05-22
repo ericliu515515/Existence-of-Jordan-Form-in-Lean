@@ -14,7 +14,7 @@ import Mathlib.RingTheory.AdjoinRoot
 import Mathlib.RingTheory.Ideal.Quotient.Operations
 import JF.Basic
 
-namespace JF
+namespace JFComparator
 
 open Module Polynomial
 
@@ -22,34 +22,17 @@ noncomputable section
 
 universe u v
 
-/-- The entry `(i, j)` is on the superdiagonal when `j = i + 1`.
 
-This uses the natural-number values of `Fin n`, so the last row has no
-superdiagonal entry. -/
-def IsSuperdiagonal {n : Nat} (i j : Fin n) : Prop :=
-  j.val = i.val + 1
-
-/-- A square matrix is in Jordan form if it has possible nonzero entries only
-on the diagonal and superdiagonal, every superdiagonal entry is either `0` or
-`1`, and a superdiagonal `1` only connects equal diagonal entries.
-
-This captures the usual block-diagonal Jordan shape without yet proving that a
-given linear map is similar to such a matrix. -/
-def IsJordanForm {n : Nat} {K : Type _} [Zero K] [One K]
-    (A : Matrix (Fin n) (Fin n) K) : Prop :=
-  (∀ i j, i ≠ j → ¬ IsSuperdiagonal i j → A i j = 0) ∧
-  (∀ i j, IsSuperdiagonal i j → A i j = 0 ∨ A i j = 1) ∧
-  (∀ i j, IsSuperdiagonal i j → A i j = 1 → A i i = A j j)
 
 /-- The single Jordan block with eigenvalue `a` and size `n`. -/
 noncomputable def JordanBlock {n : Nat} {K : Type _} [Zero K] [One K] (a : K) :
     Matrix (Fin n) (Fin n) K := by
   classical
-  exact fun i j => if i = j then a else if IsSuperdiagonal i j then 1 else 0
+  exact fun i j => if i = j then a else if JF_DEF.IsSuperdiagonal i j then 1 else 0
 
 /-- A single Jordan block is in Jordan form. -/
 theorem isJordanForm_jordanBlock {n : Nat} {K : Type _} [Zero K] [One K] (a : K) :
-    IsJordanForm (JordanBlock (n := n) a) := by
+    JF_DEF.IsJordanForm (JordanBlock (n := n) a) := by
   classical
   refine ⟨?_, ?_, ?_⟩
   · intro i j hij hnot
@@ -330,8 +313,8 @@ lemma reverseBasis_pred_ne_self {n : ℕ} {j : Fin (n + 1)} (hj : j ≠ 0) :
   omega
 
 lemma reverseBasis_pred_isSuperdiagonal {n : ℕ} {j : Fin (n + 1)} (hj : j ≠ 0) :
-    IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j := by
-  dsimp [IsSuperdiagonal]
+    JF_DEF.IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j := by
+  dsimp [JF_DEF.IsSuperdiagonal]
   have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
   omega
 
@@ -369,27 +352,27 @@ theorem quotient_X_pow_rootPlusScalarLinear_toMatrix_reverseBasis_succ
     by_cases hij : i = 0
     · subst hij
       simp [JordanBlock]
-    · have hnot : ¬ IsSuperdiagonal i 0 := by
+    · have hnot : ¬ JF_DEF.IsSuperdiagonal i 0 := by
         intro hsup
-        simp [IsSuperdiagonal] at hsup
+        simp [JF_DEF.IsSuperdiagonal] at hsup
       simp [JordanBlock, hij, hnot]
   · rw [dif_neg hj]
     have hpred_ne_j : Fin.castSucc (Fin.pred j hj) ≠ j := reverseBasis_pred_ne_self hj
-    have hsup_pred : IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
+    have hsup_pred : JF_DEF.IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
       reverseBasis_pred_isSuperdiagonal hj
     by_cases hi_j : i = j
-    · have hnot : ¬ IsSuperdiagonal i j := by
+    · have hnot : ¬ JF_DEF.IsSuperdiagonal i j := by
         rw [hi_j]
         intro hsup
         exact Nat.succ_ne_self j.val hsup.symm
       simp [JordanBlock, hi_j, hpred_ne_j.symm]
     · by_cases hi_pred : i = Fin.castSucc (Fin.pred j hj)
       · simp [JordanBlock, hi_pred, hpred_ne_j, hsup_pred]
-      · have hnot : ¬ IsSuperdiagonal i j := by
+      · have hnot : ¬ JF_DEF.IsSuperdiagonal i j := by
           intro hsup
           apply hi_pred
           apply Fin.ext
-          dsimp [IsSuperdiagonal] at hsup
+          dsimp [JF_DEF.IsSuperdiagonal] at hsup
           simp only [Fin.val_castSucc, Fin.val_pred]
           have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
           omega
@@ -535,27 +518,27 @@ theorem XSMulLinear_toMatrix_linearQuotientReverseBasis_succ
     by_cases hij : i = 0
     · subst hij
       simp [JordanBlock]
-    · have hnot : ¬ IsSuperdiagonal i 0 := by
+    · have hnot : ¬ JF_DEF.IsSuperdiagonal i 0 := by
         intro hsup
-        simp [IsSuperdiagonal] at hsup
+        simp [JF_DEF.IsSuperdiagonal] at hsup
       simp [JordanBlock, hij, hnot]
   · rw [dif_neg hj]
     have hpred_ne_j : Fin.castSucc (Fin.pred j hj) ≠ j := reverseBasis_pred_ne_self hj
-    have hsup_pred : IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
+    have hsup_pred : JF_DEF.IsSuperdiagonal (Fin.castSucc (Fin.pred j hj)) j :=
       reverseBasis_pred_isSuperdiagonal hj
     by_cases hi_j : i = j
-    · have hnot : ¬ IsSuperdiagonal i j := by
+    · have hnot : ¬ JF_DEF.IsSuperdiagonal i j := by
         rw [hi_j]
         intro hsup
         exact Nat.succ_ne_self j.val hsup.symm
       simp [JordanBlock, hi_j, hpred_ne_j.symm]
     · by_cases hi_pred : i = Fin.castSucc (Fin.pred j hj)
       · simp [JordanBlock, hi_pred, hpred_ne_j, hsup_pred]
-      · have hnot : ¬ IsSuperdiagonal i j := by
+      · have hnot : ¬ JF_DEF.IsSuperdiagonal i j := by
           intro hsup
           apply hi_pred
           apply Fin.ext
-          dsimp [IsSuperdiagonal] at hsup
+          dsimp [JF_DEF.IsSuperdiagonal] at hsup
           simp only [Fin.val_castSucc, Fin.val_pred]
           have hjpos : 0 < (j : ℕ) := (Fin.pos_iff_ne_zero).2 hj
           omega
@@ -565,7 +548,7 @@ theorem XSMulLinear_toMatrix_linearQuotientReverseBasis_succ
 Jordan form. -/
 theorem isJordanForm_XSMulLinear_linearQuotientReverseBasis_succ
     (K : Type u) [Field K] (a : K) (n : ℕ) :
-    IsJordanForm (LinearMap.toMatrix (linearQuotientReverseBasis K a (n + 1))
+    JF_DEF.IsJordanForm (LinearMap.toMatrix (linearQuotientReverseBasis K a (n + 1))
       (linearQuotientReverseBasis K a (n + 1))
       (XSMulLinear K (K[X] ⧸ K[X] ∙ (X - C a) ^ (n + 1)))) := by
   rw [XSMulLinear_toMatrix_linearQuotientReverseBasis_succ]
@@ -738,9 +721,9 @@ noncomputable def sigmaFintypeEquivFin {ι : Type u} [Fintype ι] (e : ι → �
 is immediately before the original basis vector. -/
 theorem sigmaFintypeEquivFin_pred_isSuperdiagonal {ι : Type u} [Fintype ι]
     (e : ι → ℕ) (i : ι) (j : Fin (e i)) (hj : j.val ≠ 0) :
-    IsSuperdiagonal (sigmaFintypeEquivFin e ⟨i, finPredSame j hj⟩)
+    JF_DEF.IsSuperdiagonal (sigmaFintypeEquivFin e ⟨i, finPredSame j hj⟩)
       (sigmaFintypeEquivFin e ⟨i, j⟩) := by
-  dsimp [IsSuperdiagonal]
+  dsimp [JF_DEF.IsSuperdiagonal]
   unfold sigmaFintypeEquivFin sigmaFintypeCongr
   simp only [Equiv.trans_apply, finSigmaFinEquiv_apply]
   simp only [Equiv.sigmaCongr, Equiv.trans_apply, Equiv.sigmaCongrRight_apply,
@@ -762,7 +745,7 @@ theorem exists_basis_matrix_is_jordan_form_of_minpoly_splits
     [FiniteDimensional K V] (T : V →ₗ[K] V)
     (h_split : (minpoly K T).Splits) :
     ∃ (n : Nat) (b : Basis (Fin n) K V),
-      IsJordanForm (LinearMap.toMatrix b b T) := by
+      JF_DEF.IsJordanForm (LinearMap.toMatrix b b T) := by
   classical
   obtain ⟨ι, hι, a, e, ⟨Φ⟩⟩ := exists_pid_linear_cyclic_decomposition_of_aeval' T h_split
   letI : Fintype ι := hι
@@ -801,7 +784,7 @@ theorem exists_basis_matrix_is_jordan_form_of_minpoly_splits
           apply hnot
           have hr : r = E ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩ := by
             simpa using congrArg E hp
-          have hsup : IsSuperdiagonal
+          have hsup : JF_DEF.IsSuperdiagonal
               (E ⟨(E.symm c).1, finPredSame (E.symm c).2 hc0⟩)
               (E ⟨(E.symm c).1, (E.symm c).2⟩) := by
             simpa [E] using sigmaFintypeEquivFin_pred_isSuperdiagonal e
@@ -860,4 +843,4 @@ theorem exists_basis_matrix_is_jordan_form_of_minpoly_splits
 
 end
 
-end JF
+end JFComparator
