@@ -6,7 +6,7 @@ import Mathlib.LinearAlgebra.FiniteDimensional.Basic
 import Mathlib.LinearAlgebra.Matrix.Charpoly.Minpoly
 import Mathlib.LinearAlgebra.Matrix.ToLin
 
-namespace JF_DEF
+namespace JF
 /-- The entry `(i, j)` is on the superdiagonal when `j = i + 1`.
 
 This uses the natural-number values of `Fin n`, so the last row has no
@@ -26,4 +26,4 @@ def IsJordanForm {n : Nat} {K : Type _} [Zero K] [One K]
   (∀ i j, IsSuperdiagonal i j → A i j = 0 ∨ A i j = 1) ∧
   (∀ i j, IsSuperdiagonal i j → A i j = 1 → A i i = A j j)
 
-end JF_DEF
+end JF

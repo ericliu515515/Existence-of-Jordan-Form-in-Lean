@@ -14,7 +14,7 @@ theorem exists_basis_matrix_is_jordan_form_of_minpoly_splits
     [FiniteDimensional K V] (T : V →ₗ[K] V)
     (h_split : (minpoly K T).Splits) :
     ∃ (n : Nat) (b : Basis (Fin n) K V),
-      JF_DEF.IsJordanForm (LinearMap.toMatrix b b T) := by
+      JF.IsJordanForm (LinearMap.toMatrix b b T) := by
   sorry
 
 end JFComparator
